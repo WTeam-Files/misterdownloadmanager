@@ -1,0 +1,33 @@
+# macOS Apple Silicon .dmg for this fork: the release's own build script
+# (tools/installer/build-macos.sh), with both processor targets cut to the one
+# this Mac is (aarch64) so it finishes in one pass. Everything else is the
+# release build: Xcode's tools, the Safari extension (swiftc), pwsh for the
+# browser extension, ad-hoc signing, and a ULMO .dmg.
+name: macOS arm64 dmg
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["fix/macos-external-disk"]
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Apple Silicon .dmg
+        env:
+          GH_TOKEN: ${{ github.token }} # the build's helpers, fetched from the release
+        run: |
+          sed -i '' 's/^targets=.*/targets=(aarch64-apple-darwin:arm64)/' tools/installer/build-macos.sh
+          bash tools/installer/build-macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-dmg
+          path: target/dist/*.dmg
+          if-no-files-found: error

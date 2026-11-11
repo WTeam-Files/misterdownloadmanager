@@ -299,12 +299,16 @@ mod imp {
 ///
 /// The important-usage capacity adds the purgeable space the system frees on demand, a local
 /// volume's notion (APFS caches and snapshots). A network volume (SMB, AFP, NFS) answers it with
-/// 0, and taking that 0 refused every download to it (#623): there, and whenever it answers 0,
-/// statvfs's count is the free space. Portable, so its tests run on every system.
+/// 0, and taking that 0 refused every download to it (#623). An external disk answers it with 0
+/// too when its file system is served by FSKit (exFAT and FAT32 drives since macOS 15, which
+/// still count as local): every download to one was refused with "0 bytes free". It is also
+/// never below statvfs's count on a volume where it means anything, so the larger of the two is
+/// the free space, and a volume that under-reports can only make the check too strict. Portable,
+/// so its tests run on every system.
 #[cfg(any(target_vendor = "apple", test))]
 fn free_on_apple(statvfs: u64, important: Option<u64>, local: bool) -> u64 {
     match important {
-        Some(bytes) if local && bytes > 0 => bytes,
+        Some(bytes) if local => statvfs.max(bytes),
         _ => statvfs,
     }
 }
@@ -428,6 +432,11 @@ mod tests {
         assert_eq!(free_on_apple(10 << 30, Some(12 << 30), true), 12 << 30);
         assert_eq!(free_on_apple(10 << 30, Some(0), true), 10 << 30);
         assert_eq!(free_on_apple(10 << 30, None, true), 10 << 30);
+        // An external exFAT or FAT32 disk (FSKit, macOS 15 and later) is local and answers 0, or
+        // less than the drive has: statvfs's count stands, and no download is refused.
+        assert_eq!(free_on_apple(781 << 30, Some(0), true), 781 << 30);
+        assert_eq!(free_on_apple(781 << 30, Some(1 << 20), true), 781 << 30);
+        assert!(check(&vol(free_on_apple(781 << 30, Some(0), true), "exfat"), 27 << 30).is_ok());
     }
 
     #[test]
