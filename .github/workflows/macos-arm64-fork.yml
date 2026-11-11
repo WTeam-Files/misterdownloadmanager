@@ -29,6 +29,8 @@ jobs:
             target: x86_64-apple-darwin:x86_64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
+    permissions:
+      contents: write # the release the .dmg is published to
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +44,24 @@ jobs:
           sed -i '' "s|^targets=.*|targets=(${{ matrix.target }})|" tools/installer/build-macos.sh
           bash tools/installer/build-macos.sh
 
+      # The artifact service answers with HTML error pages now and then (upload-artifact's
+      # "Unexpected token '<'" retries): the release is where the .dmg is fetched from, and the
+      # artifact is only a convenience.
+      - name: Publish the .dmg (release asset)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="fork-build"
+          gh release view "$tag" >/dev/null 2>&1 || \
+            gh release create "$tag" --title "Fork build (macOS fix)" --prerelease \
+              --notes "Built from $GITHUB_SHA by the macOS dmg workflow: the external-disk fix."
+          for f in target/dist/*.dmg; do
+            gh release upload "$tag" "$f" --clobber
+          done
+
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: mdm-dmg-${{ matrix.runner }}
           path: target/dist/*.dmg
